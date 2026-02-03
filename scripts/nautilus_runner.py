@@ -115,7 +115,7 @@ import pandas as pd
 
 from src.data import CryptoDataLoader
 from src.execution.config_loader import StrategyConfig, load_live_params
-from src.monitoring import HealthServer, HealthState
+from src.monitoring import HealthServer, HealthState, TelegramNotifier
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -316,6 +316,7 @@ class NautilusEMACrossStrategy(Strategy):
         max_drawdown_pct: Decimal = Decimal("0.05"),
         cooldown_bars: int = 3,
         health: HealthServer | None = None,
+        notifier: TelegramNotifier | None = None,
     ) -> None:
         super().__init__()
 
@@ -335,6 +336,7 @@ class NautilusEMACrossStrategy(Strategy):
         self.max_drawdown_pct = max_drawdown_pct
         self.cooldown_bars = cooldown_bars
         self.health = health
+        self.notifier = notifier
 
         # Indicators
         self.fast_ema = ExponentialMovingAverage(fast_period)
@@ -357,6 +359,11 @@ class NautilusEMACrossStrategy(Strategy):
             self.health.update(
                 status="running",
                 strategy="ema_crossover",
+            )
+
+        if self.notifier is not None:
+            self.notifier.send(
+                f"Strategy started: EMA crossover | fast={fast_period} slow={slow_period}"
             )
 
     def on_start(self) -> None:
@@ -400,6 +407,10 @@ class NautilusEMACrossStrategy(Strategy):
             drawdown = (self._peak_price - price) / self._peak_price
             if drawdown >= self.max_drawdown_pct:
                 logger.warning("Max drawdown hit, exiting position")
+                if self.notifier is not None:
+                    self.notifier.send(
+                        f"Exit (max DD) | size={self._format_trade_size(self._position_size)}"
+                    )
                 self._exit_long(self._position_size)
                 self._position_open = False
                 self._position_size = None
@@ -410,6 +421,10 @@ class NautilusEMACrossStrategy(Strategy):
 
             if price <= self._entry_price * (Decimal("1") - self.stop_loss_pct):
                 logger.warning("Stop-loss hit, exiting position")
+                if self.notifier is not None:
+                    self.notifier.send(
+                        f"Exit (stop-loss) | size={self._format_trade_size(self._position_size)}"
+                    )
                 self._exit_long(self._position_size)
                 self._position_open = False
                 self._position_size = None
@@ -420,6 +435,10 @@ class NautilusEMACrossStrategy(Strategy):
 
             if price >= self._entry_price * (Decimal("1") + self.take_profit_pct):
                 logger.info("Take-profit hit, exiting position")
+                if self.notifier is not None:
+                    self.notifier.send(
+                        f"Exit (take-profit) | size={self._format_trade_size(self._position_size)}"
+                    )
                 self._exit_long(self._position_size)
                 self._position_open = False
                 self._position_size = None
@@ -442,12 +461,20 @@ class NautilusEMACrossStrategy(Strategy):
             self._position_size = trade_size
             self._entry_price = price
             self._peak_price = price
+            if self.notifier is not None:
+                self.notifier.send(
+                    f"Entry (buy) | size={self._format_trade_size(trade_size)} | price={price}"
+                )
 
         elif fast_value < slow_value and self._position_open:
             # Bearish crossover - SELL
             if self._position_size is None:
                 logger.warning("No position size stored, skipping exit")
                 return
+            if self.notifier is not None:
+                self.notifier.send(
+                    f"Exit (signal) | size={self._format_trade_size(self._position_size)} | price={price}"
+                )
             self._exit_long(self._position_size)
             self._position_open = False
             self._position_size = None
@@ -575,6 +602,7 @@ def run_backtest(
     fast_period: int,
     slow_period: int,
     health: HealthServer | None = None,
+    notifier: TelegramNotifier | None = None,
 ) -> None:
     """
     Run a backtest with NautilusTrader engine.
@@ -627,6 +655,7 @@ def run_backtest(
         max_drawdown_pct=MAX_DRAWDOWN_PCT,
         cooldown_bars=COOLDOWN_BARS,
         health=health,
+        notifier=notifier,
     )
     engine.add_strategy(strategy)
 
@@ -689,6 +718,8 @@ def main() -> None:
     logger.info(f"Health keepalive: {HEALTH_KEEPALIVE}")
     logger.info("=" * 80)
     try:
+        notifier = TelegramNotifier.from_env()
+
         # Step 1: Load config
         fast_period, slow_period = load_config()
 
@@ -715,6 +746,7 @@ def main() -> None:
             fast_period=fast_period,
             slow_period=slow_period,
             health=health,
+            notifier=notifier,
         )
 
         if HEALTH_KEEPALIVE:
