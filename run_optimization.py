@@ -27,9 +27,10 @@ LOOKBACK_DAYS = 180  # 6 ay veri
 INITIAL_CAPITAL = 10000
 COMMISSION = 0.001  # 0.1% (Binance spot)
 
-# Optimization ranges
-FAST_RANGE = (10, 50, 2)    # (min, max, step)
-SLOW_RANGE = (30, 100, 5)   # (min, max, step)
+# Optimization ranges - EXPANDED for better coverage
+# Test more strategies: fast trend-following, medium, and slow trend-following
+FAST_RANGE = (5, 50, 1)      # (min, max, step) - more granular
+SLOW_RANGE = (20, 200, 5)    # (min, max, step) - wider range
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
