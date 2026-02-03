@@ -114,6 +114,7 @@ import pandas as pd
 
 from src.data import CryptoDataLoader
 from src.execution.config_loader import StrategyConfig, load_live_params
+from src.monitoring import HealthServer, HealthState
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -126,6 +127,10 @@ VENUE_NAME = "BINANCE"
 LOOKBACK_DAYS = 30
 INITIAL_CAPITAL = 10_000.0
 CONFIG_PATH = "config/live_params.json"
+
+# Healthcheck server
+HEALTH_HOST = os.getenv("HEALTH_HOST", "0.0.0.0")
+HEALTH_PORT = int(os.getenv("HEALTH_PORT", "8080"))
 
 # Position sizing (can be overridden via .env)
 SIZING_MODE = os.getenv("SIZING_MODE", "risk_pct").lower()  # "risk_pct" or "fixed"
@@ -304,6 +309,7 @@ class NautilusEMACrossStrategy(Strategy):
         take_profit_pct: Decimal = Decimal("0.05"),
         max_drawdown_pct: Decimal = Decimal("0.05"),
         cooldown_bars: int = 3,
+        health: HealthServer | None = None,
     ) -> None:
         super().__init__()
 
@@ -322,6 +328,7 @@ class NautilusEMACrossStrategy(Strategy):
         self.take_profit_pct = take_profit_pct
         self.max_drawdown_pct = max_drawdown_pct
         self.cooldown_bars = cooldown_bars
+        self.health = health
 
         # Indicators
         self.fast_ema = ExponentialMovingAverage(fast_period)
@@ -339,6 +346,12 @@ class NautilusEMACrossStrategy(Strategy):
             f"Fast: {fast_period} | Slow: {slow_period} | "
             f"Sizing: {self.sizing_mode}"
         )
+
+        if self.health is not None:
+            self.health.update(
+                status="running",
+                strategy="ema_crossover",
+            )
 
     def on_start(self) -> None:
         """Called when strategy starts."""
@@ -362,6 +375,14 @@ class NautilusEMACrossStrategy(Strategy):
         slow_value = self.slow_ema.value
 
         price = Decimal(str(bar.close))
+
+        if self.health is not None:
+            self.health.update(
+                last_bar_time=datetime.utcnow(),
+                last_price=float(price),
+                position_open=self._position_open,
+                position_size=float(self._position_size) if self._position_size else None,
+            )
 
         if self._cooldown_remaining > 0:
             self._cooldown_remaining -= 1
@@ -438,6 +459,8 @@ class NautilusEMACrossStrategy(Strategy):
         )
         self.submit_order(order)
         logger.info(f"🟢 BUY ORDER submitted: {size_str}")
+        if self.health is not None:
+            self.health.update(last_order_time=datetime.utcnow())
 
     def _exit_long(self, trade_size: Decimal) -> None:
         """Exit long position."""
@@ -449,6 +472,8 @@ class NautilusEMACrossStrategy(Strategy):
         )
         self.submit_order(order)
         logger.info(f"🔴 SELL ORDER submitted: {size_str}")
+        if self.health is not None:
+            self.health.update(last_order_time=datetime.utcnow())
 
     def _calculate_trade_size(self, price: Decimal) -> Decimal:
         """Calculate trade size based on sizing mode and risk constraints."""
@@ -478,6 +503,8 @@ class NautilusEMACrossStrategy(Strategy):
     def on_stop(self) -> None:
         """Called when strategy stops."""
         logger.info("Strategy stopped")
+        if self.health is not None:
+            self.health.update(status="stopped")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -541,6 +568,7 @@ def run_backtest(
     bar_type: BarType,
     fast_period: int,
     slow_period: int,
+    health: HealthServer | None = None,
 ) -> None:
     """
     Run a backtest with NautilusTrader engine.
@@ -592,6 +620,7 @@ def run_backtest(
         take_profit_pct=TAKE_PROFIT_PCT,
         max_drawdown_pct=MAX_DRAWDOWN_PCT,
         cooldown_bars=COOLDOWN_BARS,
+        health=health,
     )
     engine.add_strategy(strategy)
 
@@ -636,41 +665,56 @@ def main() -> None:
     """
     Main entry point for the Nautilus runner.
     """
+    health = HealthServer(
+        host=HEALTH_HOST,
+        port=HEALTH_PORT,
+        state=HealthState(
+            status="starting",
+            symbol=SYMBOL,
+            timeframe=TIMEFRAME,
+        ),
+    )
+    health.start()
+
     logger.info("=" * 80)
     logger.info("ALGO TRADING BOT - NAUTILUS RUNNER")
     logger.info(f"Mode: {os.getenv('TRADING_MODE', 'paper').upper()}")
     logger.info(f"Started at: {datetime.utcnow().isoformat()}")
     logger.info("=" * 80)
+    try:
+        # Step 1: Load config
+        fast_period, slow_period = load_config()
 
-    # Step 1: Load config
-    fast_period, slow_period = load_config()
+        # Step 2: Load market data
+        df = load_market_data()
 
-    # Step 2: Load market data
-    df = load_market_data()
+        # Step 3: Create instrument and bar type
+        instrument = create_instrument(SYMBOL)
+        bar_type = create_bar_type(instrument.id, TIMEFRAME)
 
-    # Step 3: Create instrument and bar type
-    instrument = create_instrument(SYMBOL)
-    bar_type = create_bar_type(instrument.id, TIMEFRAME)
+        # Step 4: Convert data to Nautilus format
+        bars = convert_dataframe_to_bars(df, bar_type)
 
-    # Step 4: Convert data to Nautilus format
-    bars = convert_dataframe_to_bars(df, bar_type)
+        if not bars:
+            logger.error("No bars to process. Exiting.")
+            health.update(status="error", last_error="No bars to process")
+            sys.exit(1)
 
-    if not bars:
-        logger.error("No bars to process. Exiting.")
-        sys.exit(1)
+        # Step 5: Run backtest (paper trading simulation)
+        run_backtest(
+            bars=bars,
+            instrument=instrument,
+            bar_type=bar_type,
+            fast_period=fast_period,
+            slow_period=slow_period,
+            health=health,
+        )
 
-    # Step 5: Run backtest (paper trading simulation)
-    run_backtest(
-        bars=bars,
-        instrument=instrument,
-        bar_type=bar_type,
-        fast_period=fast_period,
-        slow_period=slow_period,
-    )
-
-    logger.info("=" * 80)
-    logger.info("RUNNER COMPLETE")
-    logger.info("=" * 80)
+        logger.info("=" * 80)
+        logger.info("RUNNER COMPLETE")
+        logger.info("=" * 80)
+    finally:
+        health.stop()
 
 
 if __name__ == "__main__":
