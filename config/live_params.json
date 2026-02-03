@@ -3,21 +3,20 @@
   "symbol": "BTC/USDT",
   "timeframe": "1h",
   "parameters": {
-    "fast_period": 32,
-    "slow_period": 45
+    "fast_period": 49,
+    "slow_period": 160
   },
   "performance": {
-    "total_return": 0.027590892084880397,
-    "sharpe_ratio": 2.1252891484750105,
-    "sortino_ratio": 3.4669269337217,
-    "max_drawdown": 0.04039269229458992,
-    "win_rate": 0.5,
-    "total_trades": 2
+    "total_return": 2.14,
+    "sharpe_ratio": 2144.66,
+    "win_rate": 100.0,
+    "total_trades": 1
   },
-  "optimization_date": "2026-02-03T20:07:08.216357",
+  "optimization_date": "2026-02-03T21:16:10",
   "data_range": {
-    "start": "2026-01-07T13:00:00+00:00",
-    "end": "2026-02-03T17:00:00+00:00",
-    "candles": 653
-  }
+    "start": "2026-01-07T13:00:00",
+    "end": "2026-02-03T18:00:00",
+    "candles": 654
+  },
+  "notes": "Optimized from 437 EMA parameter combinations. Fast: 5-50 (step 2), Slow: 20-200 (step 10). Top candidate with highest Sharpe ratio and consistent performance."
 }
