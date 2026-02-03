@@ -79,8 +79,8 @@ services:
     # NETWORKING
     # ─────────────────────────────────────────────────────────────────────────
     # Expose ports if needed (e.g., for monitoring dashboard)
-    # ports:
-    #   - "8080:8080"
+    ports:
+      - "8080:8080"
     
     # ─────────────────────────────────────────────────────────────────────────
     # RESOURCE LIMITS (Recommended for production)
