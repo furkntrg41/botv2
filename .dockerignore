@@ -1,0 +1,62 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCKER IGNORE FILE
+# ═══════════════════════════════════════════════════════════════════════════════
+# Excludes files from Docker build context to speed up builds and reduce image size
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+env/
+.eggs/
+*.egg-info/
+*.egg
+
+# Poetry
+.poetry/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Documentation
+docs/_build/
+*.md
+!README.md
+
+# Local development
+.env.local
+.env.development
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (use volumes instead)
+data/
+*.lmdb
+
+# Reports (use volumes)
+reports/*.png
+
+# Node (if any)
+node_modules/

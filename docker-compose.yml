@@ -1,0 +1,111 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# ALGO TRADING BOT - DOCKER COMPOSE CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# This configuration enables:
+#   - Hot reloading: Code changes on Windows reflect instantly in container
+#   - Environment isolation: .env file for secrets (API keys, etc.)
+#   - Data persistence: Volumes for ArcticDB data, logs, and reports
+#
+# Usage:
+#   docker-compose up --build     # Build and run
+#   docker-compose up -d          # Run in background
+#   docker-compose logs -f        # Follow logs
+#   docker-compose down           # Stop and remove
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # TRADING BOT SERVICE
+  # ─────────────────────────────────────────────────────────────────────────────
+  trading_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    container_name: algo_trading_bot
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # VOLUMES (Hot Reloading & Persistence)
+    # ─────────────────────────────────────────────────────────────────────────
+    # Map only source code directories for hot reload, not the entire project.
+    # This preserves the installed dependencies inside the container.
+    volumes:
+      # Source code (hot reload) - READ-WRITE
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - ./config:/app/config
+      
+      # Named volumes for data persistence (survives container restarts)
+      - trading_data:/app/data
+      - trading_logs:/app/logs
+      - trading_reports:/app/reports
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # ENVIRONMENT
+    # ─────────────────────────────────────────────────────────────────────────
+    env_file:
+      - .env
+    
+    environment:
+      # Python configuration
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      
+      # Trading configuration (can be overridden in .env)
+      - TRADING_MODE=${TRADING_MODE:-paper}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+      # Timezone (important for market hours)
+      - TZ=UTC
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # COMMAND
+    # ─────────────────────────────────────────────────────────────────────────
+    command: python scripts/nautilus_runner.py
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # NETWORKING
+    # ─────────────────────────────────────────────────────────────────────────
+    # Expose ports if needed (e.g., for monitoring dashboard)
+    # ports:
+    #   - "8080:8080"
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # RESOURCE LIMITS (Recommended for production)
+    # ─────────────────────────────────────────────────────────────────────────
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 1G
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # RESTART POLICY
+    # ─────────────────────────────────────────────────────────────────────────
+    restart: unless-stopped
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # LOGGING
+    # ─────────────────────────────────────────────────────────────────────────
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NAMED VOLUMES
+# ═══════════════════════════════════════════════════════════════════════════════
+# These persist data even when containers are removed
+volumes:
+  trading_data:
+    name: algo_trading_data
+  trading_logs:
+    name: algo_trading_logs
+  trading_reports:
+    name: algo_trading_reports

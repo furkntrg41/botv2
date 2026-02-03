@@ -1,0 +1,175 @@
+[tool.poetry]
+name = "algo-trading-bot"
+version = "0.1.0"
+description = "Institutional-grade hybrid pipeline algorithmic trading system"
+authors = ["Quantitative Team <quant@trading.bot>"]
+readme = "README.md"
+license = "Proprietary"
+packages = [{ include = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+vectorbt = "^0.26.2"
+arcticdb = "^4.4.3"
+protobuf = ">=3.20,<5"
+ccxt = "^4.2.90"
+pandas = "^2.0.3"
+numpy = "^1.24.4"
+polars = "^0.20.10"
+pyarrow = "^15.0.0"
+scikit-learn = "^1.3.2"
+onnxruntime = "^1.17.0"
+pydantic = "^2.6.1"
+pydantic-settings = "^2.1.0"
+python-dotenv = "^1.0.1"
+loguru = "^0.7.2"
+orjson = "^3.9.15"
+httpx = "^0.27.0"
+websockets = "^12.0"
+aiohttp = "^3.9.3"
+redis = "^5.0.1"
+uvloop = { version = "^0.21.0", markers = "sys_platform != 'win32'" }
+msgpack = "^1.0.7"
+click = "^8.1.7"
+rich = "^13.7.0"
+tqdm = "^4.66.2"
+matplotlib = "^3.8.3"
+plotly = ">=5.0,<5.18"  # Pin for VectorBT compatibility
+
+[tool.poetry.group.dev.dependencies]
+pytest = "8.0.0"
+pytest-asyncio = "0.23.5"
+pytest-cov = "4.1.0"
+pytest-xdist = "3.5.0"
+hypothesis = "6.98.0"
+mypy = "1.8.0"
+ruff = "0.2.1"
+black = "24.2.0"
+isort = "5.13.2"
+pre-commit = "3.6.2"
+ipykernel = "6.29.2"
+jupyterlab = "4.1.2"
+nbformat = "5.9.2"
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = "1.5.3"
+mkdocs-material = "9.5.9"
+mkdocstrings = { extras = ["python"], version = "0.24.0" }
+
+[tool.poetry.scripts]
+trading-bot = "src.main:main"
+backtest = "src.analysis.cli:run_backtest"
+data-sync = "src.data.cli:sync_data"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | notebooks
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["src"]
+skip = [".venv", "notebooks"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "S",   # flake8-bandit
+    "A",   # flake8-builtins
+    "C4",  # flake8-comprehensions
+    "DTZ", # flake8-datetimez
+    "T10", # flake8-debugger
+    "ISC", # flake8-implicit-str-concat
+    "ICN", # flake8-import-conventions
+    "PIE", # flake8-pie
+    "PT",  # flake8-pytest-style
+    "Q",   # flake8-quotes
+    "RSE", # flake8-raise
+    "RET", # flake8-return
+    "SLF", # flake8-self
+    "SIM", # flake8-simplify
+    "TID", # flake8-tidy-imports
+    "TCH", # flake8-type-checking
+    "ARG", # flake8-unused-arguments
+    "PTH", # flake8-use-pathlib
+    "ERA", # eradicate
+    "PL",  # pylint
+    "TRY", # tryceratops
+    "RUF", # ruff-specific
+]
+ignore = ["E501", "S101", "PLR0913", "TRY003"]
+exclude = [".venv", "notebooks", "*.ipynb"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+show_error_codes = true
+exclude = ["notebooks/", "tests/"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "-q",
+    "--strict-markers",
+    "--tb=short",
+    "-p no:warnings",
+]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = ["*/tests/*", "*/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
