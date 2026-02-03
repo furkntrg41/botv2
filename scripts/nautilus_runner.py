@@ -132,7 +132,7 @@ CONFIG_PATH = "config/live_params.json"
 # Healthcheck server
 HEALTH_HOST = os.getenv("HEALTH_HOST", "0.0.0.0")
 HEALTH_PORT = int(os.getenv("HEALTH_PORT", "8080"))
-HEALTH_KEEPALIVE = os.getenv("HEALTH_KEEPALIVE", "false").strip().lower() in {
+HEALTH_KEEPALIVE = os.getenv("HEALTH_KEEPALIVE", "true").strip().lower() in {
     "1",
     "true",
     "yes",
@@ -686,6 +686,7 @@ def main() -> None:
     logger.info("ALGO TRADING BOT - NAUTILUS RUNNER")
     logger.info(f"Mode: {os.getenv('TRADING_MODE', 'paper').upper()}")
     logger.info(f"Started at: {datetime.utcnow().isoformat()}")
+    logger.info(f"Health keepalive: {HEALTH_KEEPALIVE}")
     logger.info("=" * 80)
     try:
         # Step 1: Load config
