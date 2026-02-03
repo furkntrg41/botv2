@@ -16,6 +16,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -70,6 +71,7 @@ TIMEFRAME = "1h"
 EXCHANGE = "binanceus"
 LOOKBACK_DAYS = 90
 INITIAL_CAPITAL = 10_000.0
+OOS_DAYS = int(os.getenv("OOS_DAYS", "90"))
 
 # Parameter ranges for optimization (as tuples: min, max, step)
 SMA_PARAM_RANGES = {
@@ -184,31 +186,50 @@ def run_research_pipeline() -> None:
     logger.info(f"Data shape: {data.shape}")
     
     # ─────────────────────────────────────────────────────────────────────────
-    # STEP 2: Strategy Optimization
+    # STEP 2: Strategy Optimization (Train) + OOS Split
     # ─────────────────────────────────────────────────────────────────────────
     print_section_header("Step 2: Strategy Optimization")
-    
+
+    timeframe_hours = {
+        "1h": 1,
+        "4h": 4,
+        "1d": 24,
+    }.get(TIMEFRAME, 1)
+    bars_per_day = max(1, int(24 / timeframe_hours))
+    oos_bars = min(len(data) // 3, OOS_DAYS * bars_per_day)
+
+    if oos_bars < 50:
+        logger.warning("OOS split too small; running full-sample optimization")
+        train_data = data
+        oos_data = None
+    else:
+        train_data = data.iloc[:-oos_bars]
+        oos_data = data.iloc[-oos_bars:]
+        logger.info(
+            f"Train bars: {len(train_data)} | OOS bars: {len(oos_data)}"
+        )
+
     engine = BacktestEngine(initial_capital=INITIAL_CAPITAL)
-    
-    # Run SMA Crossover optimization
-    logger.info("Running SMA Crossover optimization...")
+
+    # Run SMA Crossover optimization (train)
+    logger.info("Running SMA Crossover optimization (train)...")
     sma_result = engine.run_optimization(
-        price_data=data,
+        price_data=train_data,
         strategy_type="sma_crossover",
         **SMA_PARAM_RANGES,
     )
     logger.success(f"SMA optimization complete. Best Sharpe: {sma_result.metrics.sharpe_ratio:.4f}")
-    
-    # Run RSI Mean Reversion optimization
-    logger.info("Running RSI Mean Reversion optimization...")
+
+    # Run RSI Mean Reversion optimization (train)
+    logger.info("Running RSI Mean Reversion optimization (train)...")
     rsi_result = engine.run_optimization(
-        price_data=data,
+        price_data=train_data,
         strategy_type="rsi_mean_reversion",
         **RSI_PARAM_RANGES,
     )
     logger.success(f"RSI optimization complete. Best Sharpe: {rsi_result.metrics.sharpe_ratio:.4f}")
-    
-    # Determine best strategy
+
+    # Determine best strategy (train)
     best_result = max([sma_result, rsi_result], key=lambda r: r.metrics.sharpe_ratio)
     best_strategy_name = best_result.best_parameters.strategy_type
     
@@ -230,9 +251,21 @@ def run_research_pipeline() -> None:
     logger.info(f"  Total Return: {best_result.metrics.total_return * 100:+.2f}%")
     
     # ─────────────────────────────────────────────────────────────────────────
-    # STEP 4: Generate Reports
+    # STEP 4: OOS Evaluation
     # ─────────────────────────────────────────────────────────────────────────
-    print_section_header("Step 4: Report Generation")
+    if oos_data is not None:
+        print_section_header("Step 4: OOS Evaluation")
+        oos_result = engine.run_single_backtest(
+            price_data=oos_data,
+            strategy_type=best_strategy_name,
+            **best_result.best_parameters.parameters,
+        )
+        print_metrics(oos_result.metrics, f"{best_strategy_name} (OOS)")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 5: Generate Reports
+    # ─────────────────────────────────────────────────────────────────────────
+    print_section_header("Step 5: Report Generation")
     
     visualizer = StrategyVisualizer(output_dir="reports")
     

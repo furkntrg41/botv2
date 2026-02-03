@@ -127,6 +127,21 @@ LOOKBACK_DAYS = 30
 INITIAL_CAPITAL = 10_000.0
 CONFIG_PATH = "config/live_params.json"
 
+# Position sizing (can be overridden via .env)
+SIZING_MODE = os.getenv("SIZING_MODE", "risk_pct").lower()  # "risk_pct" or "fixed"
+RISK_PCT = Decimal(os.getenv("RISK_PCT", "0.01"))
+MAX_POSITION_PCT = Decimal(os.getenv("MAX_POSITION_PCT", "0.10"))
+FIXED_TRADE_SIZE = Decimal(os.getenv("TRADE_SIZE", "0.01"))
+MIN_TRADE_SIZE = Decimal(os.getenv("MIN_TRADE_SIZE", "0.000001"))
+SIZE_INCREMENT = Decimal(os.getenv("SIZE_INCREMENT", "0.000001"))
+SIZE_PRECISION = int(os.getenv("SIZE_PRECISION", "6"))
+
+# Risk management
+STOP_LOSS_PCT = Decimal(os.getenv("STOP_LOSS_PCT", "0.03"))
+TAKE_PROFIT_PCT = Decimal(os.getenv("TAKE_PROFIT_PCT", "0.05"))
+MAX_DRAWDOWN_PCT = Decimal(os.getenv("MAX_DRAWDOWN_PCT", "0.05"))
+COOLDOWN_BARS = int(os.getenv("COOLDOWN_BARS", "3"))
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATA BRIDGE: Pandas DataFrame → Nautilus Bar Objects
@@ -278,14 +293,35 @@ class NautilusEMACrossStrategy(Strategy):
         fast_period: int = 12,
         slow_period: int = 26,
         trade_size: Decimal = Decimal("0.01"),
+        sizing_mode: str = "risk_pct",
+        risk_pct: Decimal = Decimal("0.01"),
+        max_position_pct: Decimal = Decimal("0.10"),
+        min_trade_size: Decimal = Decimal("0.000001"),
+        size_increment: Decimal = Decimal("0.000001"),
+        size_precision: int = 6,
+        account_balance: Decimal = Decimal("10000"),
+        stop_loss_pct: Decimal = Decimal("0.03"),
+        take_profit_pct: Decimal = Decimal("0.05"),
+        max_drawdown_pct: Decimal = Decimal("0.05"),
+        cooldown_bars: int = 3,
     ) -> None:
         super().__init__()
 
         # Configuration
         self.instrument_id = instrument_id
         self.bar_type = bar_type
-        self.trade_size = trade_size.quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
-        self._trade_size_str = self._format_trade_size(self.trade_size)
+        self.trade_size = trade_size
+        self.sizing_mode = sizing_mode
+        self.risk_pct = risk_pct
+        self.max_position_pct = max_position_pct
+        self.min_trade_size = min_trade_size
+        self.size_increment = size_increment
+        self.size_precision = size_precision
+        self.account_balance = account_balance
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+        self.max_drawdown_pct = max_drawdown_pct
+        self.cooldown_bars = cooldown_bars
 
         # Indicators
         self.fast_ema = ExponentialMovingAverage(fast_period)
@@ -293,10 +329,15 @@ class NautilusEMACrossStrategy(Strategy):
 
         # State
         self._position_open = False
+        self._position_size: Decimal | None = None
+        self._entry_price: Decimal | None = None
+        self._peak_price: Decimal | None = None
+        self._cooldown_remaining = 0
 
         logger.info(
             f"NautilusEMACrossStrategy initialized | "
-            f"Fast: {fast_period} | Slow: {slow_period}"
+            f"Fast: {fast_period} | Slow: {slow_period} | "
+            f"Sizing: {self.sizing_mode}"
         )
 
     def on_start(self) -> None:
@@ -320,45 +361,119 @@ class NautilusEMACrossStrategy(Strategy):
         fast_value = self.fast_ema.value
         slow_value = self.slow_ema.value
 
+        price = Decimal(str(bar.close))
+
+        if self._cooldown_remaining > 0:
+            self._cooldown_remaining -= 1
+
+        # Risk management for open position
+        if self._position_open and self._entry_price is not None and self._position_size is not None:
+            self._peak_price = max(self._peak_price or self._entry_price, price)
+
+            drawdown = (self._peak_price - price) / self._peak_price
+            if drawdown >= self.max_drawdown_pct:
+                logger.warning("Max drawdown hit, exiting position")
+                self._exit_long(self._position_size)
+                self._position_open = False
+                self._position_size = None
+                self._entry_price = None
+                self._peak_price = None
+                self._cooldown_remaining = self.cooldown_bars
+                return
+
+            if price <= self._entry_price * (Decimal("1") - self.stop_loss_pct):
+                logger.warning("Stop-loss hit, exiting position")
+                self._exit_long(self._position_size)
+                self._position_open = False
+                self._position_size = None
+                self._entry_price = None
+                self._peak_price = None
+                self._cooldown_remaining = self.cooldown_bars
+                return
+
+            if price >= self._entry_price * (Decimal("1") + self.take_profit_pct):
+                logger.info("Take-profit hit, exiting position")
+                self._exit_long(self._position_size)
+                self._position_open = False
+                self._position_size = None
+                self._entry_price = None
+                self._peak_price = None
+                self._cooldown_remaining = self.cooldown_bars
+                return
+
         # Check for crossover
-        if fast_value > slow_value and not self._position_open:
+        if fast_value > slow_value and not self._position_open and self._cooldown_remaining == 0:
             # Bullish crossover - BUY
-            self._enter_long()
+            trade_size = self._calculate_trade_size(price)
+            if trade_size < self.min_trade_size:
+                logger.warning(
+                    f"Trade size too small ({trade_size}), skipping entry"
+                )
+                return
+            self._enter_long(trade_size)
             self._position_open = True
+            self._position_size = trade_size
+            self._entry_price = price
+            self._peak_price = price
 
         elif fast_value < slow_value and self._position_open:
             # Bearish crossover - SELL
-            self._exit_long()
+            if self._position_size is None:
+                logger.warning("No position size stored, skipping exit")
+                return
+            self._exit_long(self._position_size)
             self._position_open = False
+            self._position_size = None
+            self._entry_price = None
+            self._peak_price = None
+            self._cooldown_remaining = self.cooldown_bars
 
-    def _enter_long(self) -> None:
+    def _enter_long(self, trade_size: Decimal) -> None:
         """Enter a long position."""
+        size_str = self._format_trade_size(trade_size)
         order = self.order_factory.market(
             instrument_id=self.instrument_id,
             order_side=OrderSide.BUY,
-            quantity=Quantity.from_str(self._trade_size_str),
+            quantity=Quantity.from_str(size_str),
         )
         self.submit_order(order)
-        logger.info(f"🟢 BUY ORDER submitted: {self._trade_size_str}")
+        logger.info(f"🟢 BUY ORDER submitted: {size_str}")
 
-    def _exit_long(self) -> None:
+    def _exit_long(self, trade_size: Decimal) -> None:
         """Exit long position."""
+        size_str = self._format_trade_size(trade_size)
         order = self.order_factory.market(
             instrument_id=self.instrument_id,
             order_side=OrderSide.SELL,
-            quantity=Quantity.from_str(self._trade_size_str),
+            quantity=Quantity.from_str(size_str),
         )
         self.submit_order(order)
-        logger.info(f"🔴 SELL ORDER submitted: {self._trade_size_str}")
+        logger.info(f"🔴 SELL ORDER submitted: {size_str}")
 
-    @staticmethod
-    def _format_trade_size(value: Decimal) -> str:
-        """Format trade size with exactly 6 decimal places."""
-        size_str = format(value, "f")
-        if "." not in size_str:
-            size_str = f"{size_str}."
-        whole, decimals = size_str.split(".", 1)
-        return f"{whole}.{decimals.ljust(6, '0')[:6]}"
+    def _calculate_trade_size(self, price: Decimal) -> Decimal:
+        """Calculate trade size based on sizing mode and risk constraints."""
+        if price <= 0:
+            return Decimal("0")
+
+        if self.sizing_mode == "fixed":
+            raw_size = self.trade_size
+        else:
+            risk_amount = self.account_balance * self.risk_pct
+            max_amount = self.account_balance * self.max_position_pct
+            raw_size = min(risk_amount / price, max_amount / price)
+
+        return self._round_down(raw_size)
+
+    def _round_down(self, size: Decimal) -> Decimal:
+        """Round size down to the nearest increment."""
+        if self.size_increment <= 0:
+            return size
+        return (size / self.size_increment).to_integral_value(rounding=ROUND_DOWN) * self.size_increment
+
+    def _format_trade_size(self, value: Decimal) -> str:
+        """Format trade size with configured precision."""
+        rounded = self._round_down(value)
+        return f"{rounded:.{self.size_precision}f}"
 
     def on_stop(self) -> None:
         """Called when strategy stops."""
@@ -465,7 +580,18 @@ def run_backtest(
         bar_type=bar_type,
         fast_period=fast_period,
         slow_period=slow_period,
-        trade_size=Decimal("0.1"),
+        trade_size=FIXED_TRADE_SIZE,
+        sizing_mode=SIZING_MODE,
+        risk_pct=RISK_PCT,
+        max_position_pct=MAX_POSITION_PCT,
+        min_trade_size=MIN_TRADE_SIZE,
+        size_increment=SIZE_INCREMENT,
+        size_precision=SIZE_PRECISION,
+        account_balance=Decimal(str(INITIAL_CAPITAL)),
+        stop_loss_pct=STOP_LOSS_PCT,
+        take_profit_pct=TAKE_PROFIT_PCT,
+        max_drawdown_pct=MAX_DRAWDOWN_PCT,
+        cooldown_bars=COOLDOWN_BARS,
     )
     engine.add_strategy(strategy)
 
