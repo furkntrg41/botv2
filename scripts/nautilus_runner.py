@@ -132,7 +132,11 @@ CONFIG_PATH = "config/live_params.json"
 # Healthcheck server
 HEALTH_HOST = os.getenv("HEALTH_HOST", "0.0.0.0")
 HEALTH_PORT = int(os.getenv("HEALTH_PORT", "8080"))
-HEALTH_KEEPALIVE = os.getenv("HEALTH_KEEPALIVE", "false").lower() in {"1", "true", "yes"}
+HEALTH_KEEPALIVE = os.getenv("HEALTH_KEEPALIVE", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 # Position sizing (can be overridden via .env)
 SIZING_MODE = os.getenv("SIZING_MODE", "risk_pct").lower()  # "risk_pct" or "fixed"
