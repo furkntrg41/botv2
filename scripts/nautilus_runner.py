@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
@@ -131,6 +132,7 @@ CONFIG_PATH = "config/live_params.json"
 # Healthcheck server
 HEALTH_HOST = os.getenv("HEALTH_HOST", "0.0.0.0")
 HEALTH_PORT = int(os.getenv("HEALTH_PORT", "8080"))
+HEALTH_KEEPALIVE = os.getenv("HEALTH_KEEPALIVE", "false").lower() in {"1", "true", "yes"}
 
 # Position sizing (can be overridden via .env)
 SIZING_MODE = os.getenv("SIZING_MODE", "risk_pct").lower()  # "risk_pct" or "fixed"
@@ -709,6 +711,12 @@ def main() -> None:
             slow_period=slow_period,
             health=health,
         )
+
+        if HEALTH_KEEPALIVE:
+            health.update(status="idle")
+            logger.info("Health keepalive enabled; waiting for shutdown...")
+            while True:
+                time.sleep(5)
 
         logger.info("=" * 80)
         logger.info("RUNNER COMPLETE")

@@ -56,6 +56,7 @@ services:
       # Trading configuration (can be overridden in .env)
       - TRADING_MODE=${TRADING_MODE:-paper}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - HEALTH_KEEPALIVE=${HEALTH_KEEPALIVE:-true}
       
       # Timezone (important for market hours)
       - TZ=UTC
